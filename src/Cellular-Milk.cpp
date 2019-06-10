@@ -1,5 +1,3 @@
-#include "application.h"
-#line 1 "/Users/chipmc/Documents/Maker/Particle/Projects/Cellular-Milk/src/Cellular-Milk.ino"
 /*
 * Project Environmental Sensor - converged software for Low Power and Solar
 * Description: Cellular Connected Data Logger for Utility and Solar powered installations
@@ -12,12 +10,20 @@
 */
 
 // v1.00 - Initial Release - Temperature Only
+// v1.01 - With distance ranging
 
+
+#define SOFTWARERELEASENUMBER "1.01"               // Keep track of release numbers
+
+
+#include "DS18.h"
+#include "application.h"
 void setup();
 void loop();
 void sendEvent();
 void UbidotsHandler(const char *event, const char *data);
 bool takeMeasurements();
+void ping(pin_t trig_pin, pin_t echo_pin, uint32_t wait);
 void getSignalStrength();
 bool connectToParticle();
 bool disconnectFromParticle();
@@ -33,14 +39,7 @@ bool meterParticlePublish(void);
 void fullModemReset();
 void watchdogISR();
 void petWatchdog();
-#line 14 "/Users/chipmc/Documents/Maker/Particle/Projects/Cellular-Milk/src/Cellular-Milk.ino"
-#define SOFTWARERELEASENUMBER "1.0"               // Keep track of release numbers
-
-
-#include "DS18.h"
-
-// Initialize modules here
-DS18 sensor(D3);                       // Initialize sensor object
+#line 21 "/Users/chipmc/Documents/Maker/Particle/Projects/Cellular-Milk/src/Cellular-Milk.ino"
 
 
 namespace MEM_MAP {                                    // Moved to namespace instead of #define to limit scope
@@ -76,8 +75,13 @@ const int blueLED =       D7;                     // This LED is on the Electron
 const int userSwitch =    D5;                     // User switch with a pull-up resistor
 const int donePin =       D6;                     // This pin is used to let the watchdog timer know we are still alive
 const int wakeUpPin =     A7;                     // Pin the watchdog will ping us on
-const int hardResetPin =  D4;                       // Power Cycles the Electron and the Carrier Board
+const int hardResetPin =  D4;                     // Power Cycles the Electron and the Carrier Board
+const int onewirePin =    D3;                     // One wire temp probe
+const int echoPin  =      B4;                     // HC-SR04 Sensor pins
+const int triggerPin =    B2;
 
+// Initialize modules here
+DS18 sensor(D3);                       // Initialize sensor object
 
 volatile bool watchDogFlag = false;               // Flag is raised in the watchdog ISR
 
@@ -110,10 +114,7 @@ bool verboseMode;                                   // Enables more active commu
 char SignalString[64];                     // Used to communicate Wireless RSSI and Description
 const char* radioTech[8] = {"Unknown","None","WiFi","GSM","UMTS","CDMA","LTE","IEEE802154"};
 char temperatureString[16];
-char humidityString[16];
-char soilConductivityString[16];
-char soilTempInCString[16];
-char soilVolumetricWaterString[16];
+char distanceString[16];
 char batteryString[16];
 
 // Time Period Related Variables
@@ -156,6 +157,7 @@ void setup()                                                      // Note: Disco
   Particle.variable("stateOfChg", batteryString);
   Particle.variable("lowPowerMode",lowPowerMode);
   Particle.variable("temperature", temperatureString);
+  Particle.variable("distance", distanceString);
 
   
   Particle.function("Measure-Now",measureNow);
@@ -366,15 +368,47 @@ void UbidotsHandler(const char *event, const char *data)              // Looks a
 
 bool takeMeasurements() {
 
-  if (sensor.read()) {
+  if (sensor.read()) {                                        // Get temperature in C
     snprintf(temperatureString, sizeof(temperatureString), "%3.1f Degrees C", sensor.celsius());  // Ensures you get the size right and prevent memory overflow2
   }
+
+
+  ping(triggerPin, echoPin, 20);        // Trigger pin, Echo pin, delay (ms), visual=true|info=false
 
   if (Cellular.ready()) getSignalStrength();                          // Test signal strength if the cellular modem is on and ready
   stateOfCharge = int(batteryMonitor.getSoC());                       // Percentage of full charge
   snprintf(batteryString, sizeof(batteryString), "%i %%", stateOfCharge);
 
   return 1;
+}
+
+void ping(pin_t trig_pin, pin_t echo_pin, uint32_t wait)
+{
+    int duration, cm;
+    static bool init = false;
+    if (!init) {
+        pinMode(trig_pin, OUTPUT);
+        digitalWriteFast(trig_pin, LOW);
+        pinMode(echo_pin, INPUT);
+        delay(50);
+        init = true;
+    }
+
+    /* Trigger the sensor by sending a HIGH pulse of 10 or more microseconds */
+    digitalWriteFast(trig_pin, HIGH);
+    delayMicroseconds(10);
+    digitalWriteFast(trig_pin, LOW);
+  
+    duration = pulseIn(echo_pin, HIGH);
+    
+    /* Convert the time into a distance */
+    // Sound travels at 1130 ft/s (73.746 us/inch)
+    // or 340 m/s (29 us/cm), out and back so divide by 2
+    // Ref: http://www.parallax.com/dl/docs/prod/acc/28015-PING-v1.3.pdf
+    cm = duration / 29 / 2;
+
+
+    snprintf(distanceString, sizeof(distanceString), "%i cm", cm);
 }
 
 void getSignalStrength()
