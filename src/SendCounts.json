@@ -1,19 +1,18 @@
 {
-  "event": "Cellular_Soil_Hook",
+  "event": "Cellular_Milk_Hook",
   "url": "https://things.ubidots.com/api/v1.6/devices/{{PARTICLE_DEVICE_ID}}/?token={{Put your token here}}",
   "requestType": "POST",
   "mydevices": true,
   "noDefaults": true,
   "responseTemplate": "{{temperature.0.status_code}}",
-  "responseTopic": "{{PARTICLE_DEVICE_ID}}_Send_Counts",
+  "responseTopic": "{{PARTICLE_DEVICE_ID}}_Cellular_Milk_Hook",
   "json": {
     "Temperature": "{{Temperature}}",
-    "Humidity": "{{Humidity}}",
-    "Soilconductivity": "{{Soilconductivity}}",
-    "Soiltemp": "{{Soiltemp}}",
-    "Soilmoisture": "{{Soilmoisture}}",
+    "Distance": "{{Distance}}",
     "Battery": "{{Battery}}",
     "Resets": "{{Resets}}",
     "Alerts": "{{Alerts}}"
   }
+  
+   
 }
