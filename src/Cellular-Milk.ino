@@ -1,20 +1,20 @@
 /*
 * Project Environmental Sensor - converged software for Low Power and Solar
 * Description: Cellular Connected Data Logger for Utility and Solar powered installations
-* Uses two sensors - SHT-10 for Temp / Humidity and a Soil Sensor from Tinovi
-* Tindie storefront - https://www.tindie.com/products/tinovi/i2c-soil-moisture-temperature-sensor/
-* Adafruit for SHT-10 - https://www.adafruit.com/product/1298 
+* Uses two sensors - DS18H20 One Wire temperaure sensor and a HC-SR04 compatible Untrasonic rangefinder
 * Author: Chip McClelland chip@seeinsights.com
 * Sponsor: Thom Harvey ID&D
-* Date: 1 March 2019
+* Date: 10 June 2019
 */
 
 // v1.00 - Initial Release - Temperature Only
 // v1.01 - With distance ranging
 // v1.02 - Added polling intervals and webhook Cellular_Milk_Hook
+// v1.03 - Added rate control to reduce data usage
 
 
-#define SOFTWARERELEASENUMBER "1.02"               // Keep track of release numbers
+
+#define SOFTWARERELEASENUMBER "1.03"               // Keep track of release numbers
 
 
 #include "DS18.h"
@@ -76,7 +76,6 @@ unsigned long stayAwakeTimeStamp = 0;               // Timestamps for our timing
 unsigned long stayAwake;                            // Stores the time we need to wait before napping
 unsigned long webhookTimeStamp = 0;                 // Webhooks...
 unsigned long resetTimeStamp = 0;                   // Resets - this keeps you from falling into a reset loop
-unsigned long lastPublish = 0;                      // Can only publish 1/sec on avg and 4/sec burst
 
 
 // Program Variables
@@ -111,9 +110,9 @@ bool lowPowerMode;                                  // Flag for Low Power Mode o
 
 // This section is where we will initialize sensor specific variables, libraries and function prototypes
 float temperatureInC = 0;                           // Temp / Humidity Sensor variables
+float lastTemperatureInC = 0;
 int distanceInCM = 0;
-
-
+int lastDistanceInCM = 0;
 
 void setup()                                                      // Note: Disconnected Setup()
 {
@@ -193,8 +192,8 @@ void setup()                                                      // Note: Disco
   petWatchdog();                                                        // Need to pet the watchdog as we are waking from sleep
   attachInterrupt(wakeUpPin,watchdogISR,RISING);                        // Interrupt from watchdog - need to pet when triggered
 
+  meterParticlePublish();                                               // Sets the first publish time.
   if(Particle.connected() && verboseMode) Particle.publish("Startup",StartupMessage,PRIVATE);   // Let Particle know how the startup process went
-  lastPublish = millis();
 }
 
 void loop()
@@ -217,16 +216,18 @@ void loop()
       if (verboseMode) {
         waitUntil(meterParticlePublish);
         Particle.publish("State","Error taking Measurements",PRIVATE);
-        lastPublish = millis();
       }
     }
-    else state = REPORTING_STATE;
+    else if (abs(lastDistanceInCM-distanceInCM) >=1 || abs(lastTemperatureInC-temperatureInC) >= 1) state = REPORTING_STATE;
+    else if (Time.hour() != currentHourlyPeriod) state = REPORTING_STATE;
+    else state = IDLE_STATE;
     break;
 
   case REPORTING_STATE:
     if (verboseMode && state != oldState) publishStateTransition();
     if (Particle.connected()) {
       if (Time.hour() == 12) Particle.syncTime();                         // Set the clock each day at noon
+      if (Time.hour() == 0) setVerboseMode("0");                          // Turn off verbose mode
       sendEvent();                                                        // Send data to Ubidots
       state = RESP_WAIT_STATE;                                            // Wait for Response
     }
@@ -256,7 +257,6 @@ void loop()
         if (verboseMode) {
           waitUntil(meterParticlePublish);
           Particle.publish("State","Going to Sleep",PRIVATE);
-          lastPublish = millis();
         }
         delay(1000);                                                    // Time to send last update
         disconnectFromParticle();                                       // If connected, we need to disconned and power down the modem
@@ -277,7 +277,6 @@ void loop()
       if (verboseMode) {
         waitUntil(meterParticlePublish);
         Particle.publish("State","Low Battery - Sleeping",PRIVATE);
-        lastPublish = millis();
       }
       delay(1000);                                                    // Time to send last update
       disconnectFromParticle();                                       // If connected, we need to disconned and power down the modem
@@ -338,7 +337,6 @@ void UbidotsHandler(const char *event, const char *data)              // Looks a
   if ((responseCode == 200) || (responseCode == 201))
   {
     if (Particle.connected()) Particle.publish("State","Response Received", PRIVATE);
-    lastPublish = millis();
     EEPROM.write(MEM_MAP::currentCountsTimeAddr,Time.now());          // Record the last successful Webhook Response
     dataInFlight = false;                                             // Data has been received
   }
@@ -349,11 +347,13 @@ void UbidotsHandler(const char *event, const char *data)              // Looks a
 
 bool takeMeasurements() {
 
+  lastDistanceInCM = distanceInCM;                            // Load the last values 
+  lastTemperatureInC = temperatureInC;
+
   if (sensor.read()) {                                        // Get temperature in C
     temperatureInC = sensor.celsius();
     snprintf(temperatureString, sizeof(temperatureString), "%3.1f Degrees C", temperatureInC);  // Ensures you get the size right and prevent memory overflow2
   }
-
 
   ping(triggerPin, echoPin, 20);        // Trigger pin, Echo pin, delay (ms), visual=true|info=false
 
@@ -565,15 +565,18 @@ void publishStateTransition(void)
   if(Particle.connected()) {
     waitUntil(meterParticlePublish);
     Particle.publish("State Transition",stateTransitionString, PRIVATE);
-    lastPublish = millis();
   }
   Serial.println(stateTransitionString);
 }
 
-bool meterParticlePublish(void)
+bool meterParticlePublish(void)                             // Improved - now with own Timestamps
 {
-  if(millis() - lastPublish >= publishFrequency) return 1;
-  else return 0;
+  static unsigned long lastPublish = 0;
+  if(millis() - lastPublish <= publishFrequency) return 0;
+  else {
+    lastPublish = millis();
+    return 1;
+  }
 }
 
 void fullModemReset() {  // Adapted form Rikkas7's https://github.com/rickkas7/electronsample
