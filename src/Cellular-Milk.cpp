@@ -1,3 +1,8 @@
+/******************************************************/
+//       THIS IS A GENERATED FILE - DO NOT EDIT       //
+/******************************************************/
+
+#line 1 "/Users/chipmc/Documents/Maker/Particle/Projects/Cellular-Milk/src/Cellular-Milk.ino"
 /*
 * Project Environmental Sensor - converged software for Low Power and Solar
 * Description: Cellular Connected Data Logger for Utility and Solar powered installations
@@ -11,9 +16,10 @@
 
 // v1.00 - Initial Release - Temperature Only
 // v1.01 - With distance ranging
+// v1.02 - Added polling intervals
 
 
-#define SOFTWARERELEASENUMBER "1.01"               // Keep track of release numbers
+#define SOFTWARERELEASENUMBER "1.02"               // Keep track of release numbers
 
 
 #include "DS18.h"
@@ -39,7 +45,7 @@ bool meterParticlePublish(void);
 void fullModemReset();
 void watchdogISR();
 void petWatchdog();
-#line 21 "/Users/chipmc/Documents/Maker/Particle/Projects/Cellular-Milk/src/Cellular-Milk.ino"
+#line 22 "/Users/chipmc/Documents/Maker/Particle/Projects/Cellular-Milk/src/Cellular-Milk.ino"
 
 
 namespace MEM_MAP {                                    // Moved to namespace instead of #define to limit scope
@@ -81,12 +87,14 @@ const int echoPin  =      B4;                     // HC-SR04 Sensor pins
 const int triggerPin =    B2;
 
 // Initialize modules here
-DS18 sensor(D3);                       // Initialize sensor object
+DS18 sensor(D3);                                  // Initialize sensor object
 
 volatile bool watchDogFlag = false;               // Flag is raised in the watchdog ISR
 
-// Timing Variables
-const int wakeBoundary = 1*3600 + 0*60 + 0;         // 1 hour 0 minutes 0 seconds
+// Timing Variables 
+// comment out one or the other of the next lines
+//const int wakeBoundary = 1*3600 + 0*60 + 0;         // 1 hour 0 minutes 0 seconds
+const int wakeBoundary = 0*3600 + 5*60 + 0;         // 0 hours, 5 minutes, 0 seconds
 const unsigned long stayAwakeLong = 90000;          // In lowPowerMode, how long to stay awake every hour
 const unsigned long webhookWait = 45000;            // How long will we wair for a WebHook response
 const unsigned long resetWait = 30000;              // How long will we wait in ERROR_STATE until reset
@@ -129,10 +137,8 @@ bool lowPowerMode;                                  // Flag for Low Power Mode o
 
 // This section is where we will initialize sensor specific variables, libraries and function prototypes
 float temperatureInC = 0;                           // Temp / Humidity Sensor variables
-float relativeHumidity = 0;
-float soilConductivity = 0;                         // Soil sensor variables
-float soilTempInC = 0;
-float soilVolumetricWater = 0;
+int distanceInCM = 0;
+
 
 
 void setup()                                                      // Note: Disconnected Setup()
@@ -337,8 +343,8 @@ void loop()
 void sendEvent()
 {
   char data[256];                                                         // Store the date in this character array - not global
-  snprintf(data, sizeof(data), "{\"Temperature\":%4.1f, \"Humidity\":%4.1f, \"Soilconductivity\":%4.1f, \"Soiltemp\":%4.1f, \"Soilmoisture\":%4.1f, \"Battery\":%i, \"Resets\":%i, \"Alerts\":%i}", temperatureInC, relativeHumidity, soilConductivity, soilTempInC, soilVolumetricWater, stateOfCharge,resetCount, alertCount);
-  Particle.publish("Cellular_Soil_Hook", data, PRIVATE);
+  snprintf(data, sizeof(data), "{\"Temperature\":%4.1f, \"Distance\":%i, \"Battery\":%i, \"Resets\":%i, \"Alerts\":%i}", temperatureInC, distanceInCM, stateOfCharge,resetCount, alertCount);
+  Particle.publish("Cellular_Milk_Hook", data, PRIVATE);
   currentHourlyPeriod = Time.hour();                                      // Change the time period
   currentDailyPeriod = Time.day();
   dataInFlight = true;                                                // set the data inflight flag
@@ -369,7 +375,8 @@ void UbidotsHandler(const char *event, const char *data)              // Looks a
 bool takeMeasurements() {
 
   if (sensor.read()) {                                        // Get temperature in C
-    snprintf(temperatureString, sizeof(temperatureString), "%3.1f Degrees C", sensor.celsius());  // Ensures you get the size right and prevent memory overflow2
+    temperatureInC = sensor.celsius();
+    snprintf(temperatureString, sizeof(temperatureString), "%3.1f Degrees C", temperatureInC);  // Ensures you get the size right and prevent memory overflow2
   }
 
 
@@ -382,9 +389,10 @@ bool takeMeasurements() {
   return 1;
 }
 
-void ping(pin_t trig_pin, pin_t echo_pin, uint32_t wait)
+void ping(pin_t trig_pin, pin_t echo_pin, uint32_t wait)              // simple distance algorithm
+//https://community.particle.io/t/simple-photon-ping-sensor-hc-sr04/16737
 {
-    int duration, cm;
+    int duration;
     static bool init = false;
     if (!init) {
         pinMode(trig_pin, OUTPUT);
@@ -405,10 +413,10 @@ void ping(pin_t trig_pin, pin_t echo_pin, uint32_t wait)
     // Sound travels at 1130 ft/s (73.746 us/inch)
     // or 340 m/s (29 us/cm), out and back so divide by 2
     // Ref: http://www.parallax.com/dl/docs/prod/acc/28015-PING-v1.3.pdf
-    cm = duration / 29 / 2;
+    distanceInCM = duration / 29 / 2;
 
 
-    snprintf(distanceString, sizeof(distanceString), "%i cm", cm);
+    snprintf(distanceString, sizeof(distanceString), "%i cm", distanceInCM);
 }
 
 void getSignalStrength()
