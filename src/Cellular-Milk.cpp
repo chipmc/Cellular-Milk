@@ -16,7 +16,7 @@
 
 // v1.00 - Initial Release - Temperature Only
 // v1.01 - With distance ranging
-// v1.02 - Added polling intervals
+// v1.02 - Added polling intervals and webhook Cellular_Milk_Hook
 
 
 #define SOFTWARERELEASENUMBER "1.02"               // Keep track of release numbers
@@ -129,6 +129,7 @@ char batteryString[16];
 time_t t;                                           // Global time vairable
 byte currentHourlyPeriod;                           // This is where we will know if the period changed
 byte currentDailyPeriod;                            // We will keep daily counts as well as period counts
+byte currentMinutePeriod;                           // control timing when using 5-min samp intervals
 
 // Battery monitoring
 int stateOfCharge = 0;                              // Stores battery charge level value
@@ -231,7 +232,7 @@ void loop()
     if (verboseMode && state != oldState) publishStateTransition();
     if (watchDogFlag) petWatchdog();
     if (lowPowerMode && (millis() - stayAwakeTimeStamp) > stayAwake) state = SLEEPING_STATE;
-    if (Time.hour() != currentHourlyPeriod) state = MEASURING_STATE;     // We want to report on the hour but not after bedtime
+    if ((Time.minute() % 5 == 0) && (Time.minute() != currentMinutePeriod)) state = MEASURING_STATE;      // Move to a 5 minute polling interval
     if (stateOfCharge <= lowBattLimit) state = LOW_BATTERY_STATE;        // The battery is low - sleep
     break;
 
@@ -347,6 +348,7 @@ void sendEvent()
   Particle.publish("Cellular_Milk_Hook", data, PRIVATE);
   currentHourlyPeriod = Time.hour();                                      // Change the time period
   currentDailyPeriod = Time.day();
+  currentMinutePeriod = Time.minute();
   dataInFlight = true;                                                // set the data inflight flag
   webhookTimeStamp = millis();
 }
